@@ -200,10 +200,18 @@ class BowlerTool(RefactoringTool):
             filenames.sort()
             for name in filenames:
                 fullname = os.path.join(dirpath, name)
-                if not name.startswith(".") and self.filename_matcher(
-                    Filename(fullname)
-                ):
-                    self.queue_work(Filename(fullname))
+    # Skip hidden files (those starting with a dot)
+            if not name.startswith("."):
+                try:
+            # Call filename_matcher to determine if this file should be processed.
+            # Wrapping this call in a try/except block to catch and log any exceptions that might occur.
+            # This prevents the process from hanging if an error occurs during filename matching.
+                    if self.filename_matcher(Filename(fullname)):
+                        self.queue_work(Filename(fullname))
+                except Exception as e:
+            # Log the error for debugging purposes and skip processing this file.
+                    log.exception(f"Error processing filename {fullname}: {e}")
+
             # Modify dirnames in-place to remove subdirs with leading dots
             dirnames[:] = [dn for dn in dirnames if not dn.startswith(".")]
 
