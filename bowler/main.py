@@ -20,6 +20,7 @@ import click
 from .query import Query
 from .tool import BowlerTool
 from .types import START, SYMBOL, TOKEN
+from .filename_matcher import filename_matcher, FilenameMatcherError  # Import the function and error
 
 
 @click.group(invoke_without_command=True)
@@ -38,6 +39,7 @@ def main(ctx: click.Context, debug: bool, version: bool) -> None:
         BowlerTool.NUM_PROCESSES = 1
         BowlerTool.IN_PROCESS = True
 
+    # Enhanced logging setup
     root = logging.getLogger()
     if not root.hasHandlers():
         logging.addLevelName(logging.DEBUG, "DBG")
@@ -87,17 +89,21 @@ def do(interactive: bool, query: str, paths: List[str]) -> None:
         finally:
             return
 
-    code = compile(query, "<console>", "eval")
-    result = eval(code)  # noqa eval() - developer tool, hopefully they're not dumb
+    try:
+        code = compile(query, "<console>", "eval")
+        result = eval(code)  # noqa eval() - developer tool, hopefully they're not dumb
 
-    if isinstance(result, Query):
-        if result.retcode:
-            exc = click.ClickException("query failed")
-            exc.exit_code = result.retcode
-            raise exc
-        result.diff(interactive=interactive)
-    elif result:
-        click.echo(repr(result))
+        if isinstance(result, Query):
+            if result.retcode:
+                exc = click.ClickException("query failed")
+                exc.exit_code = result.retcode
+                raise exc
+            result.diff(interactive=interactive)
+        elif result:
+            click.echo(repr(result))
+    except Exception as e:
+        logging.error(f"Error executing query: {e}")
+        click.echo(f"Error executing query: {e}")
 
 
 @main.command()
@@ -137,6 +143,9 @@ def run(codemod: str, argv: List[str]) -> None:
 
     except ImportError as e:
         raise click.ClickException(f"failed to import codemod: {e}") from e
+    except Exception as e:
+        logging.error(f"Unexpected error while running codemod: {e}")
+        click.echo(f"Unexpected error while running codemod: {e}")
 
     finally:
         sys.argv[1:] = original_argv
@@ -149,15 +158,39 @@ def test(codemod: str) -> None:
     Run the tests in the codemod file
     """
 
-    # TODO: Unify the import code between 'run' and 'test'
-    module_name_from_codemod = os.path.basename(codemod).replace(".py", "")
-    spec = importlib.util.spec_from_file_location(module_name_from_codemod, codemod)
-    foo = importlib.util.module_from_spec(spec)
-    cast(Loader, spec.loader).exec_module(foo)
-    suite = unittest.TestLoader().loadTestsFromModule(foo)
+    try:
+        module_name_from_codemod = os.path.basename(codemod).replace(".py", "")
+        spec = importlib.util.spec_from_file_location(module_name_from_codemod, codemod)
+        foo = importlib.util.module_from_spec(spec)
+        cast(Loader, spec.loader).exec_module(foo)
+        suite = unittest.TestLoader().loadTestsFromModule(foo)
 
-    result = unittest.TextTestRunner().run(suite)
-    sys.exit(not result.wasSuccessful())
+        result = unittest.TextTestRunner().run(suite)
+        sys.exit(not result.wasSuccessful())
+        
+    except FilenameMatcherError as e:
+        logging.error(f"Filename matching error during tests: {e}")
+        click.echo(f"Filename matching error during tests: {e}")
+        sys.exit(1)  # Exit with failure status code
+    except Exception as e:
+        logging.error(f"Unexpected error in testing: {e}")
+        click.echo(f"Unexpected error in testing: {e}")
+        sys.exit(1)  # Exit with failure status code
+
+
+@main.command()
+@click.argument("test_file", type=click.Path(exists=True))
+def test_filename_matcher(test_file: str) -> None:
+    """Test the filename matching and error handling."""
+    try:
+        result = filename_matcher(test_file)
+        click.echo(f"File match result: {result}")
+    except FilenameMatcherError as e:
+        logging.error(f"Filename matching error: {e}")
+        click.echo(f"Filename matching error: {e}")
+    except Exception as e:
+        logging.error(f"Unexpected error: {e}")
+        click.echo(f"Unexpected error: {e}")
 
 
 if __name__ == "__main__":
